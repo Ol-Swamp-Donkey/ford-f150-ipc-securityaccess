@@ -1,298 +1,231 @@
-# 2019 Ford F-150 Instrument Cluster (IPC) — Complete Teardown, Reverse-Engineering, and Custom Boot-Splash Guide
+# 2019 F-150 IPC tach reflash — the Ford UDS SecurityAccess (0x27) keygen, L3 secrets, which Ford software by model year, and why Level-1 is the real wall
 
-*A full, replicable account of how this cluster works end-to-end: the circuit board, the chips, the memory map, the Ford CAN SecurityAccess wall, the display/boot-splash pipeline, and how to build a custom **color** boot splash. Written so the next person can skip every dead end we hit — including the tools we bought and didn't need.*
-
-> **Scope / ethics:** Everything here was done on my **own** vehicle for legitimate modification (tachometer rescale for aftermarket 8,500-RPM cams, plus a custom boot splash). **No odometer, VIN, or safety-system tampering.** Recovered secrets are published for research completeness. Check your local laws before modifying any vehicle module.
+**TL;DR** — The legacy Ford SecurityAccess algorithm is a known 24-bit LFSR, and **Level-3 (config/As-Built) secrets are trivial to recover** by sniffing one unlock and solving. **Level-1 (firmware-flash) is the wall**: you can only sniff an L1 unlock *while a module is actually being flashed*, and the Ford software will only flash a module that is **behind on its calibration**. If everything's up to date, there is no way to make it write, so there's nothing to sniff. The L1 secret is **not** in the downloadable firmware files either — it lives in the module's resident primary bootloader *inside the MCU*, reachable only by reading the chip directly. (And for the actual tach and splash mods, it turns out you don't need L1 at all — those live in separate external memory chips you can read directly.) Posting this so the next person doesn't spend the money/time to re-discover it.
 
 ---
 
-# ⚡ CLIFF NOTES (read this first)
-
-**The one-paragraph version:** The F-150 cluster is a single-chip computer (an ST **SPC5645S**, PowerPC core) plus three memory chips. Your mileage/VIN/gauge-calibration live in a tiny **EEPROM** you can edit directly. The boot-splash images live in a 32 MB **SPI flash** you can edit directly. The actual *program* (and the color **palette** that turns the splash from gray into color) lives in the MCU's internal flash, which is locked behind Ford's **SecurityAccess** — and the specific piece that colors the splash lives in the MCU's **primary bootloader**, which you can only get by reading the chip over **JTAG**. We mapped the entire display system down to the exact hardware address of the palette (`0xFFE5E000`); the last step is a JTAG dump of the bootloader.
-
-### What each piece does
-| Thing | What it is | Can you edit it directly? |
-|---|---|---|
-| **SPC5645S MCU** | The cluster's brain (PowerPC VLE core, built-in display controller "DCU3") | Only via JTAG or an unlocked flash session |
-| **24C32 EEPROM** | Per-cluster config: **VIN, odometer, gauge calibration, As-Built** | ✅ Yes — tiny I²C chip, read/write with a clip |
-| **Spansion S25FL256S** | 32 MB SPI flash = the **boot-splash images** (and other graphics) | ✅ Yes — SPI flash, read/write with a clip |
-| **MCU internal flash (app)** | The program + the **color palettes** for the running dashboard | ❌ Locked (SecurityAccess L1) — but the file is a free Ford download |
-| **MCU internal flash (bootloader)** | Runs first on power-on; **paints the boot splash**; holds the L1 secret | ❌ JTAG dump only — not distributed by Ford |
-
-### The process, start to finish
-1. **Open the cluster, identify the chips** (done — full part list below).
-2. **Edit mileage/VIN/gauges** → directly in the **24C32 EEPROM**. *(No SecurityAccess needed.)*
-3. **Change the splash *image*** → directly in the **Spansion SPI flash** (32 MB graphics partition). *(No SecurityAccess needed — this is how the grayscale custom splash already works.)*
-4. **Change the splash *colors*** → requires editing the **DCU color palette (CLUT)**, which is written by firmware. We traced it to hardware address **`0xFFE5E000`**, confirmed it's **256 × 32-bit color (ARGB)**, and found that the running app only ever loads *UI* palettes there — so the **splash's** palette is written by the **primary bootloader**. Editing it needs the bootloader (JTAG dump) + SecurityAccess L1 to re-flash.
-5. **Recover SecurityAccess secrets** → the L3 (config) secret is trivially solvable (24-bit LFSR, one capture). L1 (firmware) is the real wall — see below.
-
-### Current status (2026-11-12)
-- ✅ Tach rescale target located (EEPROM). ✅ Splash images editable (SPI flash). ✅ Custom **grayscale** animated splash built and flashable today.
-- ✅ **Color splash fully designed and packaged** (art → 256 colors → re-indexed → packed `.bin`).
-- ✅ **Exact color-palette hardware address found** (`0xFFE5E000`) and the whole display pipeline mapped.
-- ⏳ **Last blocker:** the splash palette is set by the **primary bootloader**; need a **JTAG dump** of MCU `0x0–0x8000` to patch it. (JTAG header on order.)
-
-### 🚫 What you DON'T need to do (skip our dead ends — this is the money-saver)
-- **You do NOT need the $120 Ford diagnostic subscription** for the tach or splash mods. Those live in external chips you edit directly. (We bought it; for these mods it's unnecessary.)
-- **You do NOT need a J2534 clone (VXDIAG, etc.)** for the mods, same reason.
-- **You do NOT need Ghidra 12.2 or JDK 25.** They fight each other (OSGi/Felix crash). Use **Ghidra 11.4.3 + JDK 21** — it just works.
-- **Do NOT analyze `JL3T-14C026-AF.vbf`** thinking it's the cluster app — it's the **wrong variant** and doesn't even drive the display. Use **`KL3T-14C026-BD.vbf`** (the 2 MB `KL3T` family that matches the graphics part).
-- **Do NOT byte-scan the firmware/graphics for the palette.** It's not a static table — it's loaded into DCU RAM at runtime. We wasted many passes on this. Get the reference manual instead (free).
-- **Do NOT assume `0xC3F90000` is the display controller** — that's the **GPIO/pin controller (SIUL)**, a red herring. The DCU3 is at **`0xFFE5C000`**.
-- **Do NOT use Capstone for disassembly** — it has no PowerPC **VLE** mode. Use Ghidra.
-- **Do NOT forget to set the Ghidra `vle` context register to 1** — without it, VLE firmware decodes as garbage ("plain PowerPC").
-- **The L1 SecurityAccess rabbit hole is only needed to reflash *firmware*** (which the splash *colors* require). It's **not** needed for the tach (EEPROM) or the splash *image* (SPI flash).
+## What I was actually trying to do
+I put a set of aftermarket **camshafts** in my 5.0L Coyote — they make peak power around **8,100 RPM** and I run them toward an **~8,500 RPM** redline. The stock F-150 cluster tops the tach scale at **7,000**, so past that it's meaningless. The goal was to make the tach sweep correct for the new RPM range. Purely cosmetic/informational — **not** touching odometer, VIN, or anything safety-related. At first I assumed the tach scaling lived in the cluster's *firmware* (which would make it a Level-1 / flash problem), and that assumption sent this whole write-up down the SecurityAccess road. I later learned the scaling actually lives in a small **external EEPROM** chip on the cluster board — directly editable without any of the Level-1 work below. The Level-1 firmware access turned into its own separate line of investigation.
 
 ---
 
-# PART 1 — The Hardware
+## The approaches we tried, and why each one hit a wall
+The full journey, dead ends included, so you can skip the ones that don't work. Roughly in order:
 
-The cluster opens up to one main PCB. Key components (verified off the board):
+**1. Throwing the public secret lists at Level-1 (FoCCCus / KEYBAG, ~349 known secrets).**
+Tools: **FORScan** + **OBDLink EX**, brute-force script.
+→ Every one rejected at L1 (NRC `0x35`). The IPC's L1 secret is not in any public list. ❌
 
-| Ref | Part | Function |
-|---|---|---|
-| **MCU** | **ST SPC5645S** (= NXP **MPC5645S**, same silicon), 208-LQFP | Cluster processor. PowerPC **e200z** core, **VLE** instruction set. Integrates a display controller (**DCU3**), a 2D/OpenVG accelerator, stepper-motor controllers, CAN, etc. |
-| **IC600** | **24C32** EEPROM, 8-pin SOIC (I²C) | Per-cluster config: **VIN, odometer, gauge calibration tables, FORScan As-Built**. |
-| **IC601** | **Spansion S25FL256S**, 16-pin SOIC | **32 MB SPI NOR flash** = the graphics/boot-splash partition. Memory-mapped at `0x70000000`. |
-| **IC602** | the SPC5645S (208-LQFP) | (same MCU as above) |
-| **LCD** | **Sharp LQ042T5DZ07** | 4.2" **480 × 272** WQVGA, **18-bit RGB666** (262K colors), **TTL parallel RGB** interface, WLED backlight. A "dumb" panel — no command protocol; the DCU3 streams a framebuffer to it as parallel RGB + pixel-clock/HSYNC/VSYNC/DE. **All color handling is in the DCU/firmware, not the panel.** |
-| **CAN xcvr** | **NXP TJA1042** (8-pin) | High-speed CAN transceiver (the cluster's bus interface). |
-| op-amp **†** | a **"2904V"** (dual op-amp, 8-pin) | Analog signal conditioning. |
-| **Gauges †** | 4× **Sonceboz 6405** small steppers + 2× **Sonceboz 6403** for tach/speedo | Air-core stepper gauges: oil pressure, engine temp, fuel, trans temp (small), tach + speedo (large). 18° rotor, 36:1 gear, ~300° sweep ≈ 3,600 microsteps full scale. |
+**2. Sniffing a Level-3 (As-Built) unlock and solving the algorithm.**
+Tools: an OBD2 **Y-splitter** + **OBDLink EX** (running FORScan to do the unlock) + an **OBD Monster** ELM327 clone as a passive sniffer + our solver.
+→ ✅ This part *worked* — it's how we recovered the L3 secrets and confirmed the 24-bit LFSR. **But L3 only unlocks configuration, not firmware** — it can't reflash the cluster, so it didn't get us to the goal. ❌ (for the firmware goal)
 
-> **† Marking-read confidence:** the **Sonceboz stepper numbers (6405 / 6403)** and the **"2904V" op-amp** were read off chip markings that were genuinely hard to make out on the board — tiny, low-contrast, and partially obscured. **This is our best read; we're fairly confident but not 100% sure.** If you're replicating, **double-check these against your own board** before relying on them. Everything else in this table (MCU, EEPROM, Spansion, panel, CAN transceiver, connector pinout) is confirmed.
+**3. Buying a Ford subscription tool to flash the IPC (so we could sniff a Level-1 unlock).**
+Tools: **VXDIAG VCX Nano** (J2534 clone) + the **$120 / 2-day Ford subscription**, trying **IDS → FDRS → FJDS** in turn.
+- **IDS** — doesn't cover a 2019, and the VXDIAG's older driver library wouldn't run current IDS (ERROR 2). ❌
+- **FDRS** — driver/VMS issues, wrong path for this cluster. ❌
+- **FJDS** — the *correct* tool; it reached IPC Module Reprogramming. But it reported **"No later calibration available"** — the cluster was already up to date, so it refused to flash. No flash = no L1 unlock to sniff. Tried sacrificial clusters too; all current. ❌
 
-**Connectors / pads:**
-- **C220** (a.k.a. **J1**) — the 16-cavity main harness connector. Verified pinout: **pin 8 = VBAT (+12 V)**, **pin 3 = GND**, **pins 12/13 = HS-CAN3**.
-- **J600** — a **2×14 (2×7 used) JTAG pad array on the COMPONENT side** of the board. This is the debug port for dumping the MCU. (A 2×7 SMT header solders here; one of our reference header images was missing a pin — a render artifact, not a real part.)
+The core wall here: **the Ford software only flashes a module that is *behind* on its calibration, and gives you no way to just edit firmware.** If everything's current, there is nothing to sniff.
 
-**Bench behavior:** powering the board on a bench supply (≈1.5 A) makes all the steppers sweep fully one way and click (re-zeroing). The **LCD does not light up** on the bench — it needs the full in-vehicle harness/signals — so **visual splash testing requires the cluster installed in the truck.**
+**4. Using the APIM/SYNC module as a "behind on calibration" target instead.**
+Tools: FJDS + VXDIAG + the OBDLink sniffer.
+→ Failed two ways: (a) the **APIM is on a different CAN bus** than the OBDLink EX can tap — the EX only sees HS-CAN on pins 6/14, and SYNC is on another bus, so the sniffer never saw its traffic; and (b) more fundamentally, **SYNC firmware updates over USB** (a signed package), *not* a CAN SecurityAccess flash — so there's no seed/key on the bus to capture anyway. ❌
 
-**Stepper re-zero note:** the gauges only sweep-and-zero on **power loss**, not on every key-on, because the cluster keeps a constant VBAT feed and stores needle position in memory. (Relevant if you ever trailer the car long-distance — physical jostling could desync a needle and it won't auto-correct until a power cycle.)
+**5. Extracting the L1 secret from the downloadable firmware (VBF) files.**
+Tools: the Ford VBFs (app EXE, SBL, graphics DATA partition) + our own analysis scripts.
+→ The L1 secret lives in the **resident primary bootloader**, which Ford does **not** distribute. The app EXE only carries the *L3* secret; the SBL is just a RAM flash-driver that runs *after* you're already unlocked. The L1 secret is in **none** of the downloadable files. ❌
 
----
+**→ The path we're testing next: dump the MCU directly.**
+The primary bootloader — L1 secret and all — is physically inside the cluster's MCU (an **ST SPC5645S**, 208-LQFP). **If** that chip isn't read-protected, you could JTAG-dump it, find the keygen in the firmware, and read the secret out — no Ford, no subscription. One experienced person reports these clusters aren't locked, but **we have not verified that ourselves yet** — proving it is the next step. Hardware (a PowerPC JTAG debugger + a 208-pin QFP clip) is on order; this write-up continues once we've actually tried it.
 
-# PART 2 — Memory Map (what lives where)
+**The kicker:** the *actual mods* may not need the L1 secret at all. The **tach scaling lives in an external `24C32` EEPROM** and the **boot splash in an external Spansion SPI flash** — both of which can be read/written directly with a chip programmer, no SecurityAccess involved. Recovering the L1 secret is a separate goal from getting the mods done.
 
-From the **MPC5645S Reference Manual, Chapter 2** (free NXP download — see Part 7). The addresses that matter:
+## 1) Which modules use which algorithm
+On a 2019 F-150 (HS-CAN1, 500k, 11-bit), probing SecurityAccess (service `0x27`) sorts modules into two buckets:
 
-| Address range | Region | Notes |
-|---|---|---|
-| `0x00000000`–`0x001FFFFF` | **Internal Code Flash (2 MB)** | `0x0`–`0x8000` = **primary bootloader**; `0x8000`+ = **application** |
-| `0x40000000`–`0x4000FFFF` | Internal SRAM | Layer-config shadow at `0x40005300` |
-| `0x60000000`–`0x600FFFFF` | **1 MB graphics SRAM** | Framebuffer/compositing work area |
-| `0x70000000`–`0x77FFFFFF` | **External Serial Flash A** | ← **this is the Spansion** = the graphics/splash partition |
-| `0xC3F90000` | **SIUL** (System Integration Unit Lite = GPIO/pins) | ⚠️ NOT the display controller (we wasted time here) |
-| `0xFFE5C000`–`0xFFE5FFFF` | **DCU3 (Display Control Unit)** | ← the LCD controller. **CLUT is here.** |
-| `0xFFE58000` | DCULite | Second, smaller display controller |
-| `0xFFE60000` | Stepper Motor Controller (SMC) | Drives the gauge steppers |
-| `0xFFFC0000`+ | FlexCAN 0/1/2 | CAN controllers |
+- **Legacy 24-bit LFSR (SOLVABLE):** 3-byte seed, 3-byte key. This is the one we can beat. Confirmed on **IPC, RCM, OCS, PSCM**, and others reject with NRC `0x35` (= our algorithm, wrong key → crackable by capture+solve).
+- **Different algorithm (NOT this one):** longer multi-byte key, rejects with NRC `0x13` (wrong key *length*). Seen on **ABS and IPMA (fwd camera)**. This is a different/stronger scheme — the LFSR solver does not apply.
 
-**The three directly-editable targets (no SecurityAccess):**
-1. **EEPROM (24C32)** → VIN / odometer / gauge calibration / As-Built. (I²C clip.)
-2. **Spansion SPI flash** (`0x70000000` space) → splash **images**. (SPI clip, or the free Ford `KL3T-14C088` VBF.)
-3. Everything else (program + splash **colors**) is in the MCU's internal flash → needs JTAG or an unlocked flash session.
+**We only have the equation for the LFSR bucket.** The `0x13` modules are a separate problem we did not solve.
 
 ---
 
-# PART 3 — Ford CAN SecurityAccess (service 0x27): the LFSR keygen and why Level-1 is the wall
+## Which modules are even protected (most convenience modules aren't)
+Before anyone goes hunting secrets, know this: **most of the convenience/comfort modules aren't locked at all.** We sniffed FORScan doing guided As-Built config writes across the truck and watched which modules demanded a SecurityAccess key and which just took the write:
 
-*(This is the "how do I reflash firmware over the bus" story. **You can skip all of it if you only want the tach or splash-image mods** — those are external chips. It matters only for firmware/CLUT changes.)*
+- **No security at all — config writes go straight through (no seed, no key):** the **doors** (DDM / PDM), the **radio transceiver** (RTM), and the **front-controls module** (FCIM). (The body module / APIM / PCM didn't even issue a seed.) You just write the As-Built and it sticks.
+- **The only modules that demanded a key were safety / driver-assist:** **RCM** (airbag), **OCS** (occupant classification), **PSCM** (steering) — all our solvable LFSR — plus **ABS** (brakes) and **IPMA** (forward camera), which use a *different, longer* key scheme our solver doesn't cover. And the **IPC** — the one comfort-ish module that gates its config (that's the `Neo` L3 secret).
 
-### L1 vs L3
-- **Level 3 (L3)** = extended/config access (As-Built). **Solvable.** This is also what a free FORScan extended license already gives you on these modules.
-- **Level 1 (L1)** = firmware/programming access. **The wall.** You can only capture an L1 unlock *while a module is actively being flashed*, and Ford's tool only flashes a module that's **behind on its calibration**. Current cluster = no flash = nothing to capture. And the L1 secret is **not in any downloadable file** — it's in the MCU's **primary bootloader**.
+## 2) The LFSR keygen — the actual equation
+It's a **24-bit Galois LFSR**. Two constants define it (same for every legacy Ford module):
 
-### The keygen (legacy 24-bit Galois LFSR — same constants for all legacy Ford modules)
-- **Initial state:** `0xC541A9`
-- **Feedback taps:** bits 20, 15, 12, 5, 3 (= `0x109028`)
-- **One tick:** `feedback = (next input bit) XOR (bit0)`; shift right 1; if `feedback==1` flip the 5 tap bits; `feedback` enters at bit 23.
-- **Full run (64 ticks):** load `0xC541A9` → clock in 24 **seed** bits, then 40 **secret** bits → take the final 24-bit register, **rearrange its 6 nibbles in a fixed order** → 3-byte key.
-- **Verified vector:** `seed=1F 7C 69`, `secret=00 00 FA 5F C0` → `key=9A 64 CE`.
+- **Initial state (loaded before anything):** `0xC541A9`
+- **Feedback taps:** bits **20, 15, 12, 5, 3** (= `0x109028`)
 
-### The "plug-and-solve" linear form
-Because it's all XOR (linear over GF(2)):
+**How one tick works:**
+1. `feedback = (next input bit) XOR (bit 0, the bit shifting out)`
+2. Shift the whole 24-bit register right by one.
+3. If `feedback == 1`, flip the 5 tap bits (20/15/12/5/3). If `0`, don't.
+4. The `feedback` bit itself enters at bit 23.
+
+**The full run (64 ticks):**
+- Load `0xC541A9`.
+- Clock in the **24 seed bits** (ticks 1–24), then the **40 secret bits** (ticks 25–64). Seed = 3 bytes, secret = 5 bytes, 24 + 40 = 64.
+- After 64 ticks, take the final 24-bit register and **rearrange its 6 nibbles in a fixed order** → that's your 3-byte key. (The nibble shuffle is just one more baked-in constant; no new math.)
+
+**Verified published test vector:**
 ```
-key = (A · seed) XOR (B · secret) XOR C      where C = 0x293F78
+seed = 1F 7C 69   secret = 00 00 FA 5F C0   ->   key = 9A 64 CE
 ```
-Flip it: `B·secret = key XOR (A·seed) XOR C`. **One captured `(seed,key)` pair** → 24 equations in 40 unknown secret bits → Gaussian elimination → `2^16 = 65,536` secrets all satisfy it, and **every one unlocks** (for all seeds). You can't recover the *unique* factory secret, but you don't need to.
+(Matches two independent public implementations across thousands of random vectors.)
 
-### L3 secrets recovered (proof of method)
-| Module | Req/Resp | L3 secret (one class member) |
-|---|---|---|
-| IPC (cluster) | 0x720/0x728 | `00 00 4E 65 6F` |
-| RCM (restraints) | 0x737/0x73F | `00 00 E8 FE B8` |
-| OCS (occupant) | 0x751/0x759 | `00 00 1D E3 05` |
-| PSCM (steering) | 0x730/0x738 | `00 00 01 1D E4` |
+A real run — seed `73 88 A2` + a secret, 64 ticks, watch the bits shift and the gold taps fire, key `50 88 B5` drops out:
 
-> ⚠️ RCM/OCS/PSCM are safety systems. Published for completeness; never misconfigure a restraint or steering function.
-
-### Which modules are even locked
-Most convenience modules **aren't** — doors (DDM/PDM), radio (RTM), front-controls (FCIM) take As-Built writes with **no** seed/key. Only **safety modules + the IPC** gate config. (ABS and IPMA use a *different, longer* key scheme our LFSR solver does **not** cover — they reject with NRC `0x13`.)
-
-### Sniffing gotchas (cost us real time)
-- **OBDLink EX (STN chip):** use **STN-native monitor** (`STP53`/`STPBRxxxxxx`/`STPO`), **not** `ATSP6` — with `ATSP6` it captures **zero** frames.
-- **Be on the module's bus:** the EX only taps **HS-CAN (pins 6/14)**. IPC is there (works); **APIM/SYNC is on another bus** (invisible to the EX).
-- **APIM/SYNC updates over USB** (signed package), **not** a CAN SecurityAccess flash — there's no seed/key to sniff. Don't chase it.
-
-### Why the subscription is a dead end for L1
-The $120 FJDS/FDRS subscription only flashes a module that's **behind**. On a current cluster it shows "No later calibration available," never starts a programming session, never sends `27 01`, so there's **nothing to capture**. (One untested idea: an active CAN device that *emulates* the IPC reporting an **old** calibration number, to trick the tool into starting a flash — needs a valid older part number, which we couldn't find. Unproven.)
-
-### Which Ford software by model year (this is genuinely confusing)
-- **IDS** = ~1996–2018. **Does NOT cover 2019.**
-- **FDRS** = current native tool for newer platforms.
-- **FJDS** = **module reprogramming for 2018+** via J2534. **This is the one** that reached the 2019 IPC.
+![LFSR keygen running](LFSR_RUN.gif)
 
 ---
 
-# PART 4 — The firmware files Ford gives away FREE
-
-The IPC firmware VBFs are **free downloads from motorcraftservice.com — no subscription.** (The $120 only buys the *tool* that flashes a module; the files are free.)
-
-| File | What it is | Size |
-|---|---|---|
-| `KL3T-14C026-BD.vbf` | **The cluster application firmware (EXE)** — the correct one | ~2 MB |
-| `KL3T-14C088-AD.vbf` | **The 32 MB graphics/splash partition** (Spansion content) | ~32 MB |
-| `JR3T-14C025-JA.vbf` | The **secondary (RAM) bootloader** (SBL) — runs only during a flash | small |
-| ~~`JL3T-14C026-AF.vbf`~~ | **WRONG variant** — 1 MB, does not drive the display. Don't use it. | ~1 MB |
-
-**Why free files matter:** normally you can't read firmware off your own module (UDS `0x23` ReadMemoryByAddress is gated behind the L1 secret). Ford handing you the VBFs means the splash and app reverse-engineering can start **today**, no chip dump. The **only** piece not distributed is the **primary bootloader** (and its L1 secret).
-
-### VBF format (how to extract the raw firmware)
-A VBF is an ASCII header `{ ... }` (with `sw_part_number`, `sw_part_type`, `ecu_address`, `erase = {start, len}`, `file_checksum`) followed by binary blocks. Each block: **4-byte start address (BE)**, **4-byte length (BE)**, the data, then a **2-byte checksum**.
-- `KL3T-14C026-BD`: one block at **`0x8000`**, length `0x1F8000` (2 MB), ECU `0x720` (IPC). → that's the application, loaded at `0x8000`.
-- `KL3T-14C088-AD`: one block at **`0x70000000`** (the Spansion address space), 32 MB.
-
----
-
-# PART 5 — The Boot-Splash / Display System (how it actually works)
-
-This is the part this write-up adds over the earlier one. The display pipeline is:
+## 3) The compact "plug-and-solve" form
+Because every operation is XOR (it's linear over GF(2)), the whole thing collapses to:
 
 ```
-Primary Bootloader  ─┐
-                     ├─► configures DCU3 layers ─► DCU3 reads framebuffer ─► streams RGB666 to the Sharp panel
-Application firmware ─┘        + loads the CLUT (color palette) into DCU RAM
-       (framebuffer / raster = the indexed images in the Spansion flash @ 0x70000000)
+key = (A · seed)  XOR  (B · secret)  XOR  C
 ```
+- `C = 0x293F78` (what `0xC541A9` becomes after 64 zero-input ticks — a fixed constant)
+- `A`, `B` are fixed bit-selector matrices (24×24 and 24×40). Each output key bit = XOR of a fixed set of seed bits + secret bits + a constant bit.
 
-### The splash raster (the pixels) — in the Spansion flash
-- Stored as **~25 back-to-back frames**, each **480×272 at 8 bits-per-pixel** (1 byte/pixel, linear; **130,560 bytes/frame**), in the graphics partition starting at file offset **`0x231472`** (call it `ANCHOR`). Frame *k* is at `ANCHOR + k·130560`, for `k = -2 … 22`.
-- **Each byte is a palette INDEX**, not a brightness. (On the DCU3, an 8bpp layer is **always** CLUT-indexed — there is no grayscale hardware mode.) So the image you see is `CLUT[pixel_byte]`.
-- This is why you can replace the splash image on the bench: the raster is just indexed pixels in the SPI flash. (The existing grayscale custom splash works exactly this way.)
+**Why this is the whole ballgame:** flip it around —
+```
+B · secret = key  XOR  (A · seed)  XOR  C
+```
+**One captured `(seed, key)` pair** gives 24 XOR equations in the 40 unknown secret bits → solve by Gaussian elimination. 40 unknowns, 24 equations → **2^16 = 65,536 secrets all satisfy it, and every one unlocks.** You can never recover the *unique* factory secret from bus captures, but you don't need to — any class member works for all seeds.
 
-### The DCU3 (display controller) — register map that matters
-From the **MPC5645S RM, Chapter 11**. **DCU3 base = `0xFFE5C000`.** Within it:
+**Note for anyone with multiple modules:** each module's 65,536-member class is **disjoint** from the others (different `B·secret` signature). Knowing one module's secret tells you nothing about another's. Same algorithm, different locks.
 
-| Offset | Region |
+---
+
+## 4) L3 secrets recovered (proof the method works)
+Each value below is one member of the 2^16 class — any member unlocks L3 for that module, for all seeds.
+
+| Module | Req / Resp | L3 secret |
+|---|---|---|
+| IPC (cluster) | `0x720` / `0x728` | `00 00 4E 65 6F` |
+| RCM (restraints) | `0x737` / `0x73F` | `00 00 E8 FE B8` |
+| OCS (occupant classification) | `0x751` / `0x759` | `00 00 1D E3 05` |
+| PSCM (power steering) | `0x730` / `0x738` | `00 00 01 1D E4` |
+
+These are **L3 (extended/config, As-Built)** secrets — the same access FORScan already provides on these modules with a free extended license (that's how they were captured). They do **not** grant firmware (L1) access.
+
+> ⚠️ **Safety note:** RCM/OCS are restraint/airbag-related and PSCM is steering. L3 As-Built on these can reach *safety-relevant* configuration (e.g. occupant/airbag suppression logic). Only change config on your own vehicle, and never in a way that disables or mis-arms a restraint or steering function. Recording these here for research completeness, not as an invitation to misconfigure safety systems.
+
+---
+
+## 5) How to sniff an unlock (hardware + the gotchas that cost us time)
+- **Rig:** an OBD2 **Y-splitter**, one adapter running the Ford tool / J2534, a second adapter **passively monitoring** (`ATMA`).
+- **GOTCHA 1 — monitor protocol:** on an **OBDLink EX (STN chip)** you must use the **STN-native setup** (`STP53` / `STPBRxxxxxx` / `STPO`), **not** `ATSP6`. With `ATSP6` the EX captures **zero** frames in monitor mode. This cost us a lot of confusion.
+- **GOTCHA 2 — you must be on the module's bus.** The OBDLink EX only taps **HS-CAN (pins 6/14)**. Modules on another bus are invisible. The IPC is on 6/14 (worked). **APIM/SYNC is on a different bus** (HS-CAN3), so the EX never sees it — and a J2534 tool *can* reach it, which fooled us into thinking the sniffer was broken.
+- **GOTCHA 3 — APIM/SYNC updates over USB, not CAN.** SYNC firmware is a signed package you load from a **USB stick**; the unit flashes itself. **No CAN SecurityAccess happens**, so there is nothing to sniff for the APIM no matter what bus you tap. Don't chase it.
+
+L3 (As-Built/config) unlocks are easy to catch this way with FORScan doing the config write. The seed/key is at the very start of the exchange, before any bulk traffic.
+
+---
+
+## 6) Which Ford software by model year (this was genuinely confusing — get it right)
+All come from the Ford Diagnostic Subscription (~**$120 / 2-day**) at motorcraftservice.com.
+
+- **IDS (Integrated Diagnostic Software):** ~**1996–2018** model years. **Does NOT cover 2019.**
+- **FDRS (Ford Diagnostic & Repair System):** the current-generation native tool for **newer** vehicles (2018+/2021+ platforms).
+- **FJDS (Ford J2534 Diagnostic Software):** **module reprogramming for 2018+** via a **J2534 pass-thru** device. **This is the one that reached the 2019 F-150 IPC Module Reprogramming for us.**
+
+For a **2019 F-150**: use **FJDS** (with a J2534 interface) for reprogramming. IDS is the wrong tool (no 2019 coverage). We also hit a hardware wrinkle: older **J2534 clones (VXDIAG, ~2021 driver library)** could not run the newest IDS version due to a measurement-library mismatch — FJDS was happier.
+
+---
+
+## 7) How the Ford subscription actually works — and why it's a dead end for L1
+The $120 buys the **flashing tool** (FJDS / FDRS), an online, thin-client reprogramming app. Here's the sequence it runs, and why it won't give up an L1 unlock on a healthy truck:
+
+**1. It reads the module's current software.** On connect, the tool queries the module's **software / calibration part numbers** (UDS ReadDataByIdentifier) — the IDs that say "this cluster is running calibration X, strategy Y," along with version/date info.
+
+**2. It compares those against Ford's server.** Using your VIN, it asks Ford's servers what the **latest** calibration is for that module.
+
+**3. If they match (module is current) → nothing happens.** The tool shows **"No later calibration available"** and offers **no reprogram option at all** — there is no "force it / just flash anyway" button. Because it never starts a programming session, it **never sends a SecurityAccess request (`27 01`)**, so the module is never asked for a seed, no key is ever computed or exchanged, and **there is nothing on the bus to capture.** That's the wall: on an up-to-date truck the L1 handshake simply never occurs.
+
+**4. Only if the module is BEHIND does it flash — and *that* is the one moment L1 happens.** When the server says a newer calibration exists, the tool downloads it, enters a programming session, and runs the **SecurityAccess exchange (`27 01` seed → `27 02` key)** before writing. The key is computed **server-side** (the seed goes up to Ford, the key comes back down). *That* exchange is the only capturable L1 unlock — and it only exists when there's an update to apply.
+
+So the whole thing hinges on **having a module that is genuinely behind on its calibration.** Every cluster we had — installed *and* spares — was already current → no update → no unlock → dead end. **There is no firmware-update option to force;** the reprogram path only appears when the version check says you're behind.
+
+### The one idea we have NOT tried: fake an out-of-date module
+There's a theoretical way around the "must be behind" wall. **We have not attempted this — documenting it as a concept, not a proven method:**
+
+- **The decision is based entirely on the version numbers the module *reports*.** So if you put a **device on the bus that emulates the IPC but reports an OLD calibration**, the tool should see "this module is behind," offer to reprogram, and **start the SecurityAccess unlock** — at which point the emulator hands it a seed, Ford's server computes the key, the tool sends it (`27 02`), and **you capture a real `(seed, key)` pair** to solve the L1 secret. No genuinely-old module needed.
+
+**What it would require, and why it's unproven:**
+- An **active CAN device** (not a passive sniffer) running a UDS-server emulation that answers the tool's identification queries with **old part numbers**.
+- **A list of which calibration versions are "old" vs "current" for this IPC** — which **I have not been able to find.** Without a valid *older* part number to report, you don't know what to fake.
+- The **subscription active and online** (the key is computed on Ford's server).
+- Satisfying the tool's other **precondition checks** (VIN, gateway auth, voltage) — probably easiest on the real truck with the actual IPC unplugged and the emulator in its place.
+- **Unknown:** whether the tool proceeds all the way to the `27 02` key before some precondition stops it. Plausible — SecurityAccess happens *before* any real writing — but untested.
+
+It's promising precisely because the gate is just a version-number comparison. But it's a build-it-and-see, not something we've validated.
+
+---
+
+## 8) Why Level-1 is especially hard (even with the firmware files)
+- The IPC MCU is an **ST SPC5645S** (= NXP MPC5645S, same silicon; PowerPC **VLE** core) — a dedicated instrument-cluster chip.
+- L1 (programming) SecurityAccess is handled by the **resident primary bootloader** in the MCU's flash — **Ford does not distribute that as a VBF.** The downloadable files are: the **app/EXE** (handles only L3), the **SBL** (a RAM flash-driver that runs *after* unlock — no secret), and the **graphics DATA** partition. We confirmed the L1 secret is in **none** of them.
+- This chip *has* a **censorship** feature (a factory-settable flash read-out lock), and whether it's switched on for this cluster is the open question. **If it's enabled**, a straight JTAG/BDM dump is blocked and clearing it typically **mass-erases** — so you'd be into a **voltage-glitch attack** (uncertain, no published turnkey recipe for this part). **If it's *not* enabled** (one experienced person says these clusters aren't locked — unverified by us), a normal JTAG dump just works. Which case we're in is the next thing to prove.
+
+---
+
+## The firmware files Ford gives away for free
+The IPC firmware images we used are **free downloads from [motorcraftservice.com](https://www.motorcraftservice.com) — no subscription required.** I had them well before paying for any diagnostic subscription. (That same site hosts the paid diagnostic subscription too, but the calibration/firmware VBFs are a separate, free download.) The **$120 subscription is only for the *tool* that flashes a module** — the firmware files themselves are free to anyone. That matters more than it sounds:
+
+| File | What it is |
 |---|---|
-| `0x0000`–`0x03FF` | Registers (incl. 16 layer descriptors) |
-| `0x0800`–`0x13FF` | Gamma R/G/B tables |
-| **`0x2000`–`0x3FFF`** | **CLUT / tile RAM** — the color palettes |
+| `KL3T-14C026-BD.vbf` | the cluster's **application firmware** (the EXE) |
+| `JR3T-14C025-JA.vbf` | the **secondary (RAM) bootloader** |
+| `KL3T-14C088-AD.vbf` | the **32 MB graphics / splash** partition (the Spansion flash's content) |
 
-- **Layer descriptors:** `CtrlDescLn_1..7` at `0xFFE5C000 + n·0x1C` (7 registers × 16 layers). `CtrlDescLn_1` = size, `_3` = **framebuffer pointer** (points into the Spansion at `0x70…`), **`_4` = format/encoding** (the field that selects **8bpp-CLUT** = value 3; there is no grayscale mode) + the `LUOFFS` palette offset.
-- **The CLUT itself:** **`0xFFE5E000`** (`base + 0x2000`), up to **2048 entries**, each a **32-bit ARGB word (`0xAARRGGBB`)**. An 8bpp layer uses 256 of them starting at its `LUOFFS`.
+**Why this is a big deal:** these are the real firmware images — and there is normally **no way to pull them off your own module over the bus.** Reading a module's memory over OBD (UDS `0x23` ReadMemoryByAddress) is **gated behind the Level-1 SecurityAccess secret** — the exact secret nobody outside Ford has. So without Ford's website handing them to you, the only other route to this firmware is to **physically dump the chips** (open the cluster, tap the MCU / desolder the flash).
 
-**So the splash's palette is 256 × 32-bit *color* entries at `0xFFE5E000`.** It looks gray only because those entries currently hold gray values (R=G=B). **Change them → color.** No format change, no panel change.
+In other words: **Ford gives this firmware away for free, yet you still couldn't read it off your own module without the L1 secret you can't get.** That's a real shortcut:
+- The **graphics / splash file is already in hand**, so the splash reverse-engineering can start *now*, before any chip is touched.
+- The **app firmware is in hand**, which is where the **tach-scaling checksum** logic lives — so that can be reversed from a file Ford gave us, no chip dump required.
 
-### Who loads the CLUT (and the big discovery)
-In the **application** (`KL3T-14C026-BD`), the only function that writes the CLUT (`FUN_00071a28` in our Ghidra project) **copies palettes out of a firmware table** into `0xFFE5E000`:
-- The table is at **VA `0x13CCD0`**, 8-byte entries = **`{source_pointer, entry_count}`**, indexed by CLUT ID.
-- The CLUT data is stored contiguously from **`0x132118`**, each palette = `count` × 4-byte ARGB.
-- There are **142 palettes** — and they are **all the colorful UI palettes** (icons, gauges, menus: oranges, blues, greens). **None is a 256-entry grayscale ramp.**
-
-That's the key finding: **the application never writes a gray palette.** So the **boot splash's gray palette is written by something that runs *before* the app — the primary bootloader (PBL)**, resident at `0x0–0x8000`, which paints the splash in the first milliseconds of power-on and then hands off to the app. (The secondary bootloader/SBL is *not* it — the SBL only runs from RAM during an active reflash and never shows the splash.)
-
-**Consequence:** recoloring the splash = editing the CLUT write in the **PBL**. The PBL is not a distributed VBF, so we need a **JTAG dump of `0x0–0x8000`**. (And re-flashing it needs SecurityAccess L1.)
+The one thing **not** in these files is the **primary bootloader** (and its L1 secret) — Ford doesn't ship that one. That's the only piece that still forces a chip dump.
 
 ---
 
-# PART 6 — Building a Custom COLOR Splash (the practical pipeline)
+## What we know about the boot splash
+The "BUILT FORD TOUGH" boot animation lives in the **32 MB graphics partition** (`KL3T-14C088`) — i.e. the external **Spansion SPI flash** on the cluster board. Here's where our understanding is solid vs. where it's still guesswork.
 
-Everything except the final flash is done and in this repo.
+![boot splash animation](boot_splash.gif)
 
-### The constraint
-The panel shows **256 colors total** (one shared CLUT), 480×272, 8bpp indexed. So any color image must be reduced to **one optimized 256-color palette**, and the pixels re-indexed to it.
+*(Rebuilt directly from the graphics partition with `rebuild_splash.py`. Auto-contrast applied — see the assumptions below.)*
 
-### The pipeline (scripts/notes included)
-1. **Source art:** 25 color frames at native **480×272** (we used an AI-generated color animation; any 480×272 color frames work).
-2. **Shared 256-color palette:** quantize all 25 frames *together* (median-cut) so one palette serves the whole animation; dither with Floyd–Steinberg for smooth gradients.
-3. **Re-index** every frame's pixels to that palette → new 8bpp raster.
-4. **Luminance-sort the palette** (sort entries dark→bright and remap indices to match). This is the clever bit: it makes the new raster display as a **clean grayscale** version under the *stock* gray palette, and **full color** once our palette is loaded — graceful degradation, so you can flash and verify the image before the palette problem is solved.
-5. **Pack** the re-indexed frames into the graphics-partition `.bin` at `ANCHOR + k·130560` (k=-2…22), exactly where the stock frames live. Flash it like any graphics update.
+**What we've actually confirmed:**
+- The panel is **480 × 272** (a Sharp WQVGA automotive LCD).
+- The splash is stored as a run of **~25 back-to-back frames**, each **480×272 at 8 bits-per-pixel** (one byte per pixel, linear layout, 130,560 bytes per frame), starting around offset `0x231472`.
+- Decoding those bytes straight to a grayscale image yields the **correct, recognizable animation** (the metal plaque forming on a concrete/dust background) — so the frame size, layout, and bit-depth are right.
+- The grain in the dark areas is **authored texture** (the gritty concrete look), not a decode error — the dash's filtering plus viewing distance smooth it out.
 
-**Deliverables in this repo:**
-- `COLOR_SPLASH_graphics.bin` — the 32 MB graphics partition with the color animation packed in (shows grayscale with the stock palette, color once the CLUT is updated).
-- `COLOR_SPLASH_palette_256.bin` — the 256-color palette (ready to write into the CLUT once we can patch the PBL).
-- `COLOR_SPLASH_preview.gif` — what it looks like in color.
+**⚠️ ASSUMPTIONS — NOT verified (treat these as guesses, not fact):**
+- 🟡 **That the 8-bit values are luminance (true grayscale), not indexes into a color palette.** We looked for a palette/CLUT and didn't find one, and a color (planar-RGB) interpretation rendered as noise — so we *assume* it's 8-bit grayscale. We have **not** confirmed how the firmware actually interprets these bytes when it draws them.
+- 🟡 **That the blue Ford oval on the real dash is a *separate* overlay painted on top — not part of this raster.** The running cluster shows a grayscale scene with a **blue** Ford oval, but the oval *inside these frames is grayscale*. So we *assume* the blue is drawn separately at render time (possibly an OpenVG vector overlay) rather than stored in the 8bpp data. **Unverified.**
+- 🟡 **That the display applies a brightening gamma/LUT.** Our raw render looked dark; the real dash looks brighter, so we *assume* a brightening curve is applied at render. (The GIF above has auto-contrast to approximate it.)
 
-**What's left:** write `COLOR_SPLASH_palette_256.bin` into the splash CLUT. That lives in the **PBL** → JTAG dump + L1 to flash.
-
----
-
-# PART 7 — Reverse-Engineering Toolkit & Methodology (replication guide)
-
-### Tools that actually worked
-- **Ghidra 11.4.3** + **JDK 21** (Eclipse Temurin). *Not* Ghidra 12.2 / JDK 25 (they crash on OSGi/Felix). 
-- **pypdf** (Python) to extract text/tables from the NXP reference-manual PDF.
-- **Python + numpy + Pillow** for all the image/palette/packing work.
-- A free **NXP account** to download the **MPC5645S Reference Manual (`MPC5645SRM`)** — this single document is what cracked the display analysis (memory map + DCU3 chapter). Get this *first*.
-
-### Ghidra setup for SPC5645S firmware (the exact gotchas)
-1. Extract the raw firmware from the VBF (the block at `0x8000`).
-2. Import as **Language `PowerPC:BE:64:VLE-32addr`**, **base address `0x8000`**, Raw Binary loader.
-3. **CRITICAL:** the VLE language has a context register named **`vle`** that defaults to **0**, which decodes everything as *plain* PowerPC (garbage — `bdnzf`, `lfs`, `lwz`). Before disassembling, **set `vle = 1`** over the whole image (clear existing code units first, then `ProgramContext.setValue(vle, start, end, BigInteger.ONE)`). Then analyze. Now you get real VLE (`se_*`, `e_bl`, `e_lis`).
-4. **Don't force-disassemble the whole block with follow-flow** — it chases branches into data and thrashes (we produced a 5 GB log once). Let normal auto-analysis run, then target specific functions.
-
-### How we found the CLUT (the method, so you can repeat it)
-1. RM memory map → DCU3 base `0xFFE5C000`, CLUT at `+0x2000`.
-2. In Ghidra, find functions with **resolved references into `0xFFE5C000–0xFFE60000`** → the one touching `0xFFE5E000` is the CLUT writer (`FUN_00071a28`).
-3. Decompile it → it copies from a `{ptr,count}` table → dump that table → classify each palette as gray vs color.
-4. Confirm the app has no gray 256-palette → conclude the splash palette is in the PBL.
+**What this means for changing it:** the splash file is in hand and the frame format is understood well enough to swap images — but the open questions above (how color is really handled, the vector overlay, and any checksum/CRC on the partition) all have to be answered before a modified splash would display correctly. That's the reverse-engineering still to do.
 
 ---
 
-# PART 8 — 🚫 WHAT YOU DON'T NEED TO DO (the full skip-list)
+## Bottom line for the next person
+- **L3 (config) secrets:** easy. Sniff one unlock, solve the LFSR, done.
+- **L1 (firmware) secret:** you need **a module that's behind on calibration** to trigger a flash you can sniff, OR a **chip-level dump** of the MCU's primary bootloader (which works cleanly *only if* the chip isn't read-protected — something we haven't verified yet). No behind-module + no chip dump = **you cannot get L1** from the subscription software, and it's **not in the firmware files**.
+- **If your goal is the tach rescale or a custom splash:** you likely **don't need L1 at all** — the tach scaling is in an external EEPROM and the splash in an external SPI flash, both editable directly with a chip programmer. The deep Level-1 / SecurityAccess path is only needed if you specifically want to reflash the cluster's *firmware* over the bus — and the $120 subscription alone won't do that if your cluster is already current.
 
-We tried a lot of things that turned out unnecessary. Learn from them:
-
-**Tools/purchases you can skip (for the tach & splash mods):**
-- The **$120 Ford diagnostic subscription** (FJDS/FDRS) — unnecessary for EEPROM/SPI edits.
-- A **J2534 clone (VXDIAG VCX Nano)** — same.
-- **IDS** entirely for a 2019 (no coverage).
-- Chasing **APIM/SYNC** as a flash target — it updates over USB, no CAN seed/key.
-
-**Software/analysis dead ends:**
-- **Ghidra 12.2 / JDK 25** — OSGi/Felix crash; use **11.4.3 + JDK 21**.
-- **Capstone** for disassembly — no VLE mode.
-- **Byte-scanning** firmware or the graphics partition for the palette — it's runtime DCU RAM, not a static table. (We did this ~8 different ways. All futile.)
-- Treating **`0xC3F90000`** as the display controller — it's **SIUL/GPIO**.
-- The **`JL3T-14C026-AF`** 1 MB firmware — wrong variant, no DCU code. Use **`KL3T-14C026-BD`** (2 MB).
-- Forgetting the **`vle` context register** in Ghidra — guarantees garbage.
-- A **"palette probe"** flash-and-photograph approach — only needed if you *can't* get the reference manual. With the RM it's deterministic; skip it.
-
-**Conceptual traps:**
-- Thinking the splash is "grayscale by hardware" — **it's indexed color**; gray is just the palette values.
-- Thinking the **app** sets the splash palette — it doesn't; the **PBL** does.
-- Thinking you need **L1** for the tach or the splash *image* — you don't; only for firmware/CLUT.
+Hope this saves someone the weekend and the money. Happy to answer questions.
 
 ---
 
-# PART 9 — Current Status & What's Next
-
-**Done:**
-- Full hardware ID, memory map, and SecurityAccess analysis.
-- Complete display-pipeline reverse-engineering: DCU3 at `0xFFE5C000`, CLUT at `0xFFE5E000` (256× ARGB), layer format fields, the app's 142-palette UI CLUT table, the CLUT loader, and the conclusion that the splash palette is in the PBL.
-- A custom **color** splash fully designed, quantized, re-indexed, and packed — plus a grayscale-fallback build that's flashable today.
-
-**Next (blocked on hardware in the mail):**
-1. Solder the **2×7 header onto J600** and attach a **PowerPC JTAG debugger**.
-2. **Check JTAG censorship** first — the SPC5645S has a factory read-protect lock. If open, a dump of `0x0–0x8000` just works; if locked, that's a separate problem (glitch attack, no turnkey recipe).
-3. **Dump the primary bootloader** (`0x0–0x8000`), find its splash CLUT write, and point it at `COLOR_SPLASH_palette_256.bin`.
-4. Re-flash (needs L1) → **color splash on the dash.**
-
-**The end goal** (why this write-up exists): document the whole cluster so anyone can do this, and build a **pogo-pin JTAG jig** that clips onto `J600` to read/patch any cluster someone mails in — custom splash + settings, no gatekeeping, no $640 "service."
-
----
-
-*Disclaimer: performed on my own vehicle for legitimate repair/modification. No odometer, VIN, or safety-system tampering. Recovered secrets published for research completeness only. Verify local laws before modifying any vehicle module.*
+*Disclaimer: this was all done on my own vehicle for legitimate repair/modification (tachometer rescale for aftermarket cams). No odometer, VIN, or safety-system tampering. Check your local laws before modifying any vehicle module.*
