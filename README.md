@@ -38,10 +38,6 @@ A few smaller LCD quirks on top of those, which are known issues.
 
 So the full cluster swap gets me the tach range but breaks the gear display. That’s the answer to the obvious question, “why not just run the V6 cluster?” Because you lose four gears on the readout.
 
-The better idea: swap only the gauge face
-
-Instead of swapping the whole cluster, I swap just the printed dial face, the one that reads to 8,000, off the V6 cluster and onto my own V8 cluster. That way I keep my truck’s correct 10 speed behavior and still get a dial that reads to 8,000.
-
 Second idea: swap just the gauge face
 
 So I tried the smaller version: leave my own cluster in the truck and swap over only the printed dial face, the one that reads to 8,000, from the V6 cluster. The trouble is that the shifter letters along the bottom of the dash (Park, Reverse, Neutral, Drive, and so on) are printed on that face, and the little lights that illuminate them sit right behind it. The V6 face doesn’t line up with where my V8 cluster puts those lights. So the moment I swapped the face on, the dash lit up the wrong letter: it told me I was in reverse when I was actually in park, neutral when I was in reverse, and so on right down the line. You can’t just swap the faces. That one stopped me dead in my tracks.
