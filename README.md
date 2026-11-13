@@ -240,7 +240,7 @@ A VBF is an ASCII header `{ ... }` (with `sw_part_number`, `sw_part_type`, `ecu_
 
 # PART 5 — The Boot-Splash / Display System (how it actually works)
 
-This is the part this write-up adds over the earlier one. The stock "BUILT FORD TOUGH" boot animation, rebuilt directly from the graphics partition:
+The factory images are stored in black and white, the primary bootloader "adds" the color, which we don't have level 1 access to... yet.  This is the part this write-up adds over the earlier one. The stock "BUILT FORD TOUGH" boot animation, rebuilt directly from the graphics partition:
 
 ![Stock boot-splash animation, reconstructed from the graphics partition](boot_splash.gif)
 
