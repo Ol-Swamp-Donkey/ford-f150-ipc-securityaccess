@@ -69,7 +69,7 @@ The cluster opens up to one main PCB — a **Visteon "P552 L1"** board (board ma
 **Connectors / pads:**
 - **C220** (a.k.a. **J1**) — the 16-cavity (2×8) main harness connector. Key pins: **8 = VBAT (+12 V)**, **3 = GND**, **12 = HS-CAN3 High**, **13 = HS-CAN3 Low** (plus fuel-level, park-detect, washer, and switch signals). Full pinout:
 
-![C220 connector pinout — F-150 2019 IPC](C220_IPC_pinout.png)
+![C220 connector pinout — PCB / board-side view, orientation matches the board photo above](C220_IPC_pinout_pcb.png)
 
 - **J600** — a **2×7 JTAG pad array (14 pads) on the COMPONENT side** of the board: the debug port for dumping/flashing the MCU over JTAG. Pin 1 is bottom-left. A 2×7 SMT header solders here. Pinout:
 
