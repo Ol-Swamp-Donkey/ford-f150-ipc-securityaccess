@@ -6,42 +6,88 @@
 
 ---
 
-# ⚡ CLIFF NOTES (read this first)
+Start Here: The Plain English Version
 
-**The one-paragraph version:** The F-150 cluster is a single-chip computer (an ST **SPC5645S**, PowerPC core) plus three memory chips. Your mileage/VIN/gauge-calibration live in a tiny **EEPROM** you can edit directly. The boot-splash images live in a 32 MB **SPI flash** you can edit directly. The actual *program* (and the color **palette** that turns the splash from gray into color) lives in the MCU's internal flash, which is locked behind Ford's **SecurityAccess** — and the specific piece that colors the splash lives in the MCU's **primary bootloader**, which you can only get by reading the chip over **JTAG**. We mapped the entire display system down to the exact hardware address of the palette (`0xFFE5E000`); the last step is a JTAG dump of the bootloader.
+What this project is: I set out to make the tachometer in my 2019 Ford F-150 read higher than the factory gauge allows, and I ended up reverse engineering how the truck’s whole instrument cluster works. This page is the story in plain language. The technical sections further down are the actual instructions. If you just want to understand what I did and why, read this first.
 
-### What each piece does
-| Thing | What it is | Can you edit it directly? |
-|---|---|---|
-| **SPC5645S MCU** | The cluster's brain (PowerPC VLE core, built-in display controller "DCU3") | Only via JTAG or an unlocked flash session |
-| **24C32 EEPROM** | Per-cluster config: **VIN, odometer, gauge calibration, As-Built** | ✅ Yes — tiny I²C chip, read/write with a clip |
-| **Spansion S25FL256S** | 32 MB SPI flash = the **boot-splash images** (and other graphics) | ✅ Yes — SPI flash, read/write with a clip |
-| **MCU internal flash (app)** | The program + the **color palettes** for the running dashboard | ❌ Locked (SecurityAccess L1) — but the file is a free Ford download |
-| **MCU internal flash (bootloader)** | Runs first on power-on; **paints the boot splash**; holds the L1 secret | ❌ JTAG dump only — not distributed by Ford |
+The short version
 
-### The process, start to finish
-1. **Open the cluster, identify the chips** (done — full part list below).
-2. **Edit mileage/VIN/gauges** → directly in the **24C32 EEPROM**. *(No SecurityAccess needed.)*
-3. **Change the splash *image*** → directly in the **Spansion SPI flash** (32 MB graphics partition). *(No SecurityAccess needed — this is how the grayscale custom splash already works.)*
-4. **Change the splash *colors*** → requires editing the **DCU color palette (CLUT)**, which is written by firmware. We traced it to hardware address **`0xFFE5E000`**, confirmed it's **256 × 32-bit color (ARGB)**, and found that the running app only ever loads *UI* palettes there — so the **splash's** palette is written by the **primary bootloader**. Editing it needs the bootloader (JTAG dump) + SecurityAccess L1 to re-flash.
-5. **Recover SecurityAccess secrets** → the L3 (config) secret is trivially solvable (24-bit LFSR, one capture). L1 (firmware) is the real wall — see below.
+I put bigger aftermarket camshafts in my truck. They rev higher than the factory gauge can show, so I needed the tachometer to read to 8,000 RPM instead of 7,000. What looked like a simple change turned into a project that stretched across months to crack open the cluster’s software, because Ford locks the part that controls the gauges. This repo documents everything I learned so the next person doesn’t have to spend the hours and money I did.
 
-### Current status (2026-11-12)
-- ✅ Tach rescale target located (EEPROM). ✅ Splash images editable (SPI flash). ✅ Custom **grayscale** animated splash built and flashable today.
-- ✅ **Color splash fully designed and packaged** (art → 256 colors → re-indexed → packed `.bin`).
-- ✅ **Exact color-palette hardware address found** (`0xFFE5E000`) and the whole display pipeline mapped.
-- ⏳ **Last blocker:** the splash palette is set by the **primary bootloader**; need a **JTAG dump** of MCU `0x0–0x8000` to patch it. (JTAG header on order.)
+How it started: a broken engine part
 
-### 🚫 What you DON'T need to do (skip our dead ends — this is the money-saver)
-- **You do NOT need the $120 Ford diagnostic subscription** for the tach or splash mods. Those live in external chips you edit directly. (We bought it; for these mods it's unnecessary.)
-- **You do NOT need a J2534 clone (VXDIAG, etc.)** for the mods, same reason.
-- **You do NOT need Ghidra 12.2 or JDK 25.** They fight each other (OSGi/Felix crash). Use **Ghidra 11.4.3 + JDK 21** — it just works.
-- **Do NOT analyze `JL3T-14C026-AF.vbf`** thinking it's the cluster app — it's the **wrong variant** and doesn't even drive the display. Use **`KL3T-14C026-BD.vbf`** (the 2 MB `KL3T` family that matches the graphics part).
-- **Do NOT byte-scan the firmware/graphics for the palette.** It's not a static table — it's loaded into DCU RAM at runtime. We wasted many passes on this. Get the reference manual instead (free).
-- **Do NOT assume `0xC3F90000` is the display controller** — that's the **GPIO/pin controller (SIUL)**, a red herring. The DCU3 is at **`0xFFE5C000`**.
-- **Do NOT use Capstone for disassembly** — it has no PowerPC **VLE** mode. Use Ghidra.
-- **Do NOT forget to set the Ghidra `vle` context register to 1** — without it, VLE firmware decodes as garbage ("plain PowerPC").
-- **The L1 SecurityAccess rabbit hole is only needed to reflash *firmware*** (which the splash *colors* require). It's **not** needed for the tach (EEPROM) or the splash *image* (SPI flash).
+My truck had a part fail called a finger follower. It’s a small lever with a little roller wheel that rides against the camshaft, the shaft that opens and closes the engine’s valves. When that follower fails, it stops rolling smoothly and starts hammering the camshaft, which ruins it. The trouble was I couldn’t tell which follower had failed or which camshaft got chewed up.
+
+The repair became an upgrade
+
+Rather than just replace the broken piece, I decided to build the engine stronger and make more power while I was in there. I bought a set of GSC Stage 2 camshafts made for my engine (the third generation “Coyote” V8), plus GT500 finger followers and GT350 hydraulic lash adjusters to go with them.
+
+The new problem: the gauge can’t keep up
+
+Those new camshafts make their peak power at about 8,100 RPM, and you run them out to 8,500. But my factory V8 tachometer only goes to 7,000. The needle literally runs out of dial before the engine runs out of power.
+
+A clever idea using factory parts
+
+I found out that the V6 version of the same truck came from the factory with a tachometer that reads to 8,000. The face of that gauge, the printed dial, physically fits my cluster. So the plan became: swap the V6’s 8,000 RPM dial face onto my V8 cluster, and now the gauge shows the right range.
+
+Why the swap alone doesn’t work
+
+Changing the printed face doesn’t change how the needle moves. Behind every needle is a tiny motor (a stepper motor) that the cluster tells how far to swing for a given RPM. Put an 8,000 face on without changing anything else and the needle now points to the wrong number. I had to get into the cluster’s software and teach it again how far to move the needle.
+
+First attempt: the easy door (ForScan)
+
+I started with ForScan, free software a lot of Ford owners use, plus a cheap adapter that plugs into the truck’s port. I went through every setting I could find. I even spotted some “8,000 RPM” options, but those turned out to be for Fords with fully digital dashboards, not my analog needle and dial setup. Dead end.
+
+Understanding the lock
+
+Here’s the key idea the whole project hinges on. The cluster will only let you change things if you give it the right “password” first, and there are different passwords for different levels of access. Think of a building where your wristband only gets you into certain rooms:
+
+Level 3 is the owner friendly wristband. It’s what ForScan uses, and it lets you toggle the nice convenience stuff: seatbelt chimes, the four wheel drive menus, trailer brake screens, and so on.
+Level 1 is the deep access wristband. The gauge calibration, the thing I actually need, lives behind this door, and Level 3 doesn’t open it.
+
+So the real goal narrowed down to: get Level 1 access.
+
+The $120 dead end
+
+I bought a two day subscription to Ford’s official software, hoping to reflash (reinstall) the cluster’s software. My plan was that during an official update I could quietly record the Level 1 “handshake” as it went by and capture the password. Problem: the tool only lets you reflash if your cluster is behind on its software version. Mine was already up to date, so it refused to do anything. $120 gone, door still locked.
+
+Going to the source: Ford’s own files
+
+I wasn’t willing to quit. I figured if it exists, it can be done. After a lot of digging I found Ford’s actual firmware files available online (through Ford’s motorcraft service site, worth double checking the exact source). I downloaded them, decompiled them (translated the raw code into something readable), and started mapping out how everything worked.
+
+While I was this deep anyway, I added a second goal for fun: the boot splash screen. When you turn the key, the cluster plays a little animation, a chunk of steel stamped “Built Ford Tough” slamming into concrete. It looks cool, but I wanted to put my own graphic there instead.
+
+The four pieces of software (what’s actually inside)
+
+Digging through the files, it comes down to four parts. (The exact file names are in the technical sections.)
+
+The primary bootloader, the cluster’s innermost startup program, living in protected memory. Ford does not give this one out.
+The secondary bootloader, a helper that loads during updates.
+The splash screen / graphics file, the startup animation and other on screen imagery.
+The EEPROM, a small memory chip that remembers settings even with the battery disconnected. This is where the gauge calibrations live (the tach, speedometer, and the other needles), along with vehicle identity info like the VIN and the mileage.
+A shortcut from a stranger on Reddit
+
+Someone on Reddit pointed out something important: the tachometer calibration sits in that EEPROM chip, and you don’t actually need the Level 1 password to get at it. You can buy a little clip that attaches directly to the chip, plus a device that talks to it, and read the chip’s contents off and write new contents back on, going around the main processor entirely. So that’s what I did for the gauge calibration. The splash screen graphics chip works the same way; it’s a different size, so it needs its own clip, but the idea is identical: clip on, read and write directly, skip the locked front door.
+
+The catch that sends me back to Level 1
+
+Here’s the snag. The splash screen’s color (that signature blue) isn’t stored in the graphics file. It appears to live in the primary bootloader, the one locked piece Ford won’t hand out. So to fully control the splash screen, I still need inside that bootloader, which means I still need the Level 1 secret after all.
+
+The backdoor: JTAG
+
+More digging turned up the way in. These cluster circuit boards have a small set of connection points on them called a JTAG header, essentially a maintenance port chip makers use to talk directly to the processor. If I solder pins onto that header and connect a JTAG tool (I’m using a PE Multilink), I can pull the primary bootloader straight off the chip, the file Ford doesn’t share, and the Level 1 secret is inside it. That’s the backdoor. Once I have it, I have full access to read, change, and customize anything on the cluster.
+
+What else I’m mapping along the way
+
+While doing all this, I’ve been documenting everything about how the cluster works: what controls the warning LEDs on the board, what drives each stepper motor (fuel, transmission temp, engine temp, oil pressure, and the rest), so that eventually anyone can customize any part of this instrument cluster, not just the tach.
+
+Where I am right now
+
+I’m waiting on the JTAG header pins to arrive in the mail (expected early December). Once they’re here, I solder them on, pull the bootloader, and we should be able to wrap this up.
+
+Why I’m sharing all of this
+
+I spent tens of hours and real money hitting dead ends to figure this out. I’m putting it all here, free and in the open, so the next person can skip the dead ends and jump straight to the part that works.
 
 ---
 
