@@ -26,13 +26,29 @@ The new problem: the gauge can’t keep up
 
 Those new camshafts make their peak power at about 8,100 RPM, and you run them out to 8,500. But my factory V8 tachometer only goes to 7,000. The needle literally runs out of dial before the engine runs out of power.
 
-A clever idea using factory parts
+First idea: swap in the whole V6 cluster
 
-I found out that the V6 version of the same truck came from the factory with a tachometer that reads to 8,000. The face of that gauge, the printed dial, physically fits my cluster. So the plan became: swap the V6’s 8,000 RPM dial face onto my V8 cluster, and now the gauge shows the right range.
+Here’s where the V6 comes in. The V6 version of my truck came from the factory with a cluster that reads all the way to 8,000. So my first move was the obvious one: pull my cluster out, drop the complete V6 cluster into my truck, and clean up anything else through the configuration files.
 
-Why the swap alone doesn’t work
+It read to 8,000 like I wanted, but it brought a new problem with it. The V6 trucks use a 6 speed transmission (the 6R80). My truck has a 10 speed. A cluster is built around the transmission it came with, so a few things on the display don’t match my truck:
 
-Changing the printed face doesn’t change how the needle moves. Behind every needle is a tiny motor (a stepper motor) that the cluster tells how far to swing for a given RPM. Put an 8,000 face on without changing anything else and the needle now points to the wrong number. I had to get into the cluster’s software and teach it again how far to move the needle.
+Gear count in manual mode (the big one). When you shift into manual mode and pick your own gears, the dash shows which gear you’re in. The V6 cluster only counts 1 through 6, so with my 10 speed I could never see gears 7 through 10. That alone is a dealbreaker.
+The gear selector letters at the bottom. Those are the letters that light up for Park, Reverse, Neutral, Drive, and so on. The V6 cluster has seven of them: Park, Reverse, Neutral, Drive, Manual, 2, and 1. My 10 speed only uses five: Park, Reverse, Neutral, Drive, and M for Manual. The good news is both clusters light up the correct letter when you actually shift, so Park reads Park, Reverse reads Reverse, right down the line. The only catch is that the 2 and the 1 on the V6 cluster never light up, because my truck never uses them. Not really a problem, but I’d rather not have dead indicators sitting there.
+A few smaller LCD quirks on top of those, which are known issues.
+
+So the full cluster swap gets me the tach range but breaks the gear display. That’s the answer to the obvious question, “why not just run the V6 cluster?” Because you lose four gears on the readout.
+
+The better idea: swap only the gauge face
+
+Instead of swapping the whole cluster, I swap just the printed dial face, the one that reads to 8,000, off the V6 cluster and onto my own V8 cluster. That way I keep my truck’s correct 10 speed behavior and still get a dial that reads to 8,000.
+
+Second idea: swap just the gauge face
+
+So I tried the smaller version: leave my own cluster in the truck and swap over only the printed dial face, the one that reads to 8,000, from the V6 cluster. The trouble is that the shifter letters along the bottom of the dash (Park, Reverse, Neutral, Drive, and so on) are printed on that face, and the little lights that illuminate them sit right behind it. The V6 face doesn’t line up with where my V8 cluster puts those lights. So the moment I swapped the face on, the dash lit up the wrong letter: it told me I was in reverse when I was actually in park, neutral when I was in reverse, and so on right down the line. You can’t just swap the faces. That one stopped me dead in my tracks.
+
+The true fix: run the V6 cluster and reprogram it to think like a V8
+
+So here’s where I actually landed, and it’s the opposite of what you’d expect. I run the complete V6 cluster, which already reads to 8,000 and already sweeps the tach needle correctly, and then I reprogram its software so the LCD shows all the V8 information instead of the V6 information: all 10 gears in manual mode, the correct set of selector letters, and the other display pieces that differ between the two trucks. In other words, instead of trying to make my V8 cluster read higher, I take the cluster that already reads higher and teach it to speak my truck’s language. It’s the hard road, but it’s the only version that gets every part of the dash right, and getting into that software is what the rest of this write up is about.
 
 First attempt: the easy door (ForScan)
 
