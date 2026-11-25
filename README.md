@@ -1,5 +1,15 @@
 # 2019 Ford F-150 Instrument Cluster (IPC) — Complete Teardown, Reverse-Engineering, and Custom Boot-Splash Guide
 
+### Secrets recovered (proof of method)
+| Module | Request/Response | L1 secret | L3 secret |
+|---|---|---|---|
+| Instrument Panel Cluster (IPC) | 0x720/0x728 | `03 11 19 61 02` | `00 00 4E 65 6F` |
+| Restraints Control Module (RCM) | 0x737/0x73F | *not solved* | `00 00 E8 FE B8` |
+| Occupant Classification System (OCS) | 0x751/0x759 | *not solved* | `00 00 1D E3 05` |
+| Power Steering Control Module (PSCM) | 0x730/0x738 | *not solved* | `00 00 01 1D E4` |
+
+> ⚠️ RCM/OCS/PSCM are safety systems. Published for completeness; never misconfigure a restraint or steering function.
+
 *A full, replicable account of how this cluster works end-to-end: the circuit board, the chips, the memory map, the Ford CAN SecurityAccess wall, the display/boot-splash pipeline, and how to build a custom **color** boot splash. Written so the next person can skip every dead end we hit — including the tools we bought and didn't need.*
 
 > **Scope / ethics:** Everything here was done on my **own** vehicle for legitimate modification (tachometer rescale for aftermarket 8,500-RPM cams, plus a custom boot splash). **No odometer, VIN, or safety-system tampering.** Recovered secrets are published for research completeness. Check your local laws before modifying any vehicle module.
@@ -190,13 +200,13 @@ key = (A · seed) XOR (B · secret) XOR C      where C = 0x293F78
 ```
 Flip it: `B·secret = key XOR (A·seed) XOR C`. **One captured `(seed,key)` pair** → 24 equations in 40 unknown secret bits → Gaussian elimination → `2^16 = 65,536` secrets all satisfy it, and **every one unlocks** (for all seeds). You can't recover the *unique* factory secret, but you don't need to.
 
-### L3 secrets recovered (proof of method)
-| Module | Req/Resp | L3 secret (one class member) |
-|---|---|---|
-| IPC (cluster) | 0x720/0x728 | `00 00 4E 65 6F` |
-| RCM (restraints) | 0x737/0x73F | `00 00 E8 FE B8` |
-| OCS (occupant) | 0x751/0x759 | `00 00 1D E3 05` |
-| PSCM (steering) | 0x730/0x738 | `00 00 01 1D E4` |
+### Secrets recovered (proof of method)
+| Module | Request/Response | L1 secret | L3 secret |
+|---|---|---|---|
+| Instrument Panel Cluster (IPC) | 0x720/0x728 | `03 11 19 61 02` | `00 00 4E 65 6F` |
+| Restraints Control Module (RCM) | 0x737/0x73F | *not solved* | `00 00 E8 FE B8` |
+| Occupant Classification System (OCS) | 0x751/0x759 | *not solved* | `00 00 1D E3 05` |
+| Power Steering Control Module (PSCM) | 0x730/0x738 | *not solved* | `00 00 01 1D E4` |
 
 > ⚠️ RCM/OCS/PSCM are safety systems. Published for completeness; never misconfigure a restraint or steering function.
 
