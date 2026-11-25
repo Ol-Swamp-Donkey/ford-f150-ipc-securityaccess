@@ -97,7 +97,11 @@ Here’s the snag. The splash screen’s color (that signature blue) isn’t sto
 
 The backdoor: JTAG
 
-More digging turned up the way in. These cluster circuit boards have a small set of connection points on them called a JTAG header, essentially a maintenance port chip makers use to talk directly to the processor. If I solder pins onto that header and connect a JTAG tool (I’m using a PE Multilink), I can pull the primary bootloader straight off the chip, the file Ford doesn’t share, and the Level 1 secret is inside it. That’s the backdoor. Once I have it, I have full access to read, change, and customize anything on the cluster.
+More digging turned up the way in. These cluster boards have a small set of connection points called a JTAG header — essentially a maintenance port chip makers use to talk straight to the processor. So I soldered a tiny 2×7 header onto those pads, hooked up my JTAG tool (a PE Multilink), and pulled the primary bootloader — the one file Ford won’t hand out — right off the chip.
+
+It didn’t come easy. The connector isn’t keyed, so it only works flipped one way around (the tell: the stepper motors make no noise (Zeroing out) on power-up when the connector is arranged incorrectly). The processor locks the JTAG port the instant the normal software boots, so I had to catch it right at the moment of power-on, power-cycling the cluster over and over until the tool finally latched. But once it did, the whole bootloader came off the chip.
+
+Then I decompiled it, and there it was — the Level 1 secret, sitting right in the code, exactly where I figured it’d be. That’s the backdoor, and it’s open. With it I’ve got full access to read, change, and customize anything on this cluster: the gauge calibration I was chasing, the custom boot splash, all of it.
 
 What else I’m mapping along the way
 
