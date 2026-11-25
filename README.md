@@ -149,6 +149,14 @@ The cluster opens up to one main PCB — a **Visteon "P552 L1"** board (board ma
 
 *JTAG wiring: **TDI**=1, **TDO**=3, **TCK**=5, **RESET**=9, **TMS**=10, **VREF**=11 (~3.3 V), **GND**=2/4/6/12. Pin 8=KEY, 14=JCOMP, 7/13=n/c. (A PEmicro Multilink or any PowerPC/e200 JTAG probe maps straight onto these.)*
 
+![J600 JTAG pads, bare — before soldering](J600_JTAG_pads_bare.jpg)
+*The J600 debug port as it comes: a bare 2×7 SMD pad array on the component side.*
+
+![J600 with a 2×7 header soldered on](J600_JTAG_header_soldered.jpg)
+*After: a 2×7 header soldered to J600, ready for the JTAG ribbon.*
+
+> **Note — done on a sacrificial board.** I worked out the solder-and-dump on a **spare cluster with the low-end monochrome LCD** (the pixely blue-teal screen), **not** the 4.2″ color unit — so there was zero risk of bricking the good cluster while I figured out the JTAG process. The J600 header and the MPC5645S are identical on both boards, so the bootloader dump is the same either way.
+
 **Bench behavior:** powering the board on a bench supply (≈1.5 A) makes all the steppers sweep fully one way and click (re-zeroing). The **LCD does not light up** on the bench — it needs the full in-vehicle harness/signals — so **visual splash testing requires the cluster installed in the truck.**
 
 **Stepper re-zero note:** the gauges only sweep-and-zero on **power loss**, not on every key-on, because the cluster keeps a constant VBAT feed and stores needle position in memory. (Relevant if you ever trailer the car long-distance — physical jostling could desync a needle and it won't auto-correct until a power cycle.)
