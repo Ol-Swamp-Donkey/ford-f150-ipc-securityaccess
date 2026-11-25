@@ -327,7 +327,7 @@ The panel shows **256 colors total** (one shared CLUT), 480×272, 8bpp indexed. 
 
 Our custom color splash (256-color, built from the pipeline above):
 
-![Custom color boot-splash animation (256-color)](COLOR_SPLASH_preview.gif)
+![Custom color boot-splash animation (256-color)](COYOTE.gif)
 
 **What's left:** write `COLOR_SPLASH_palette_256.bin` into the splash CLUT. That lives in the **PBL** → JTAG dump + L1 to flash.
 
