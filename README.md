@@ -47,10 +47,10 @@ First idea: swap in the whole V6 cluster
   </tr>
   <tr>
     <td align="center">
-      <img src="images/V8_IPC.jpg" width="100%">
+      <img src="V8_IPC.jpg" width="100%">
     </td>
     <td align="center">
-      <img src="images/V6_IPC.jpg" width="100%">
+      <img src="V6_IPC.jpg" width="100%">
     </td>
   </tr>
   <tr>
@@ -91,7 +91,7 @@ The objective of this project is to obtain a fully functional instrument cluster
 Unfortunately, swapping the V6 faceplate onto the V8 instrument cluster and reprogramming the tachometer is not a viable solution. This is because the gear selector markings are centered on their respective faceplates, resulting in different physical locations for each character.
 
 <p align="center">
-  <img src="images/gear_selector_alignment.svg" width="650">
+  <img src="gear_selector_alignment.svg" width="650">
   <br>
   <em>Illustration of the physical misalignment between the V8 and V6 gear selector markings.</em>
 </p>
@@ -107,7 +107,7 @@ When the V6 instrument cluster is installed in the V8 truck, the P, R, N, D, and
 The conversion itself is relatively simple. We need to transfer the entire EEPROM configuration from the original V8 instrument cluster while retaining the V6 tachometer conversion table.
 
 <p align="center">
-  <img src="images/eeprom_conversion.svg" width="650">
+  <img src="eeprom_conversion.svg" width="650">
 </p>
 
 This preserves the original vehicle's mileage, VIN, display screen configurations, trailer brake settings, gauge calibrations, and other vehicle specific configuration settings.
