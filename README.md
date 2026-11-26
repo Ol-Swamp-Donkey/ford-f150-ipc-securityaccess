@@ -38,23 +38,85 @@ Those new camshafts make their peak power at about 8,100 RPM, and you run them o
 
 First idea: swap in the whole V6 cluster
 
-Here’s where the V6 comes in. The V6 version of my truck came from the factory with a cluster that reads all the way to 8,000. So my first move was the obvious one: pull my cluster out, drop the complete V6 cluster into my truck, and clean up anything else through the configuration files.
+## 1. Understanding the Differences Between the V8 and V6 Instrument Clusters
 
-It read to 8,000 like I wanted, but it brought a new problem with it. The V6 trucks use a 6 speed transmission (the 6R80). My truck has a 10 speed. A cluster is built around the transmission it came with, so a few things on the display don’t match my truck:
+<table>
+  <tr>
+    <th>V8 Instrument Panel Cluster with 4.2" LCD Screen</th>
+    <th>V6 Instrument Panel Cluster with 4.2" LCD Screen</th>
+  </tr>
+  <tr>
+    <td align="center">
+      <img src="images/V8_IPC.jpg" width="100%">
+    </td>
+    <td align="center">
+      <img src="images/V6_IPC.jpg" width="100%">
+    </td>
+  </tr>
+  <tr>
+    <td align="center">Faceplate: JL3BAA</td>
+    <td align="center">Faceplate: TBD</td>
+  </tr>
+</table>
 
-Gear count in manual mode (the big one). When you shift into manual mode and pick your own gears, the dash shows which gear you’re in. The V6 cluster only counts 1 through 6, so with my 10 speed I could never see gears 7 through 10. That alone is a dealbreaker.
-The gear selector letters at the bottom. Those are the letters that light up for Park, Reverse, Neutral, Drive, and so on. The V6 cluster has seven of them: Park, Reverse, Neutral, Drive, Manual, 2, and 1. My 10 speed only uses five: Park, Reverse, Neutral, Drive, and M for Manual. The good news is both clusters light up the correct letter when you actually shift, so Park reads Park, Reverse reads Reverse, right down the line. The only catch is that the 2 and the 1 on the V6 cluster never light up, because my truck never uses them. Not really a problem, but I’d rather not have dead indicators sitting there.
-A few smaller LCD quirks on top of those, which are known issues.
+Although these two instrument clusters appear nearly identical, there are several differences in their appearance and functionality.
 
-So the full cluster swap gets me the tach range but breaks the gear display. That’s the answer to the obvious question, “why not just run the V6 cluster?” Because you lose four gears on the readout.
+### Visual Differences
 
-Second idea: swap just the gauge face
+| Feature | V8 | V6 |
+|---|---|---|
+| Tachometer range | 0–7,000 RPM | 0–8,000 RPM |
+| Gear selector markings | P R N D M | P R N D M 2 1 |
+| LCD gear indication in manual mode | 1–10 | 1–6 |
 
-So I tried the smaller version: leave my own cluster in the truck and swap over only the printed dial face, the one that reads to 8,000, from the V6 cluster. The trouble is that the shifter letters along the bottom of the dash (Park, Reverse, Neutral, Drive, and so on) are printed on that face, and the little lights that illuminate them sit right behind it. The V6 face doesn’t line up with where my V8 cluster puts those lights. So the moment I swapped the face on, the dash lit up the wrong letter: it told me I was in reverse when I was actually in park, neutral when I was in reverse, and so on right down the line. You can’t just swap the faces. That one stopped me dead in my tracks.
+### Internal Differences
 
-The true fix: run the V6 cluster and reprogram it to think like a V8
+Although the four smaller gauges appear identical, their internal stepper motor conversion tables differ. These tables determine the position of each gauge needle based on the corresponding sensor input.
 
-So here’s where I actually landed, and it’s the opposite of what you’d expect. I run the complete V6 cluster, which already reads to 8,000 and already sweeps the tach needle correctly, and then I reprogram its software so the LCD shows all the V8 information instead of the V6 information: all 10 gears in manual mode, the correct set of selector letters, and the other display pieces that differ between the two trucks. In other words, instead of trying to make my V8 cluster read higher, I take the cluster that already reads higher and teach it to speak my truck’s language. It’s the hard road, but it’s the only version that gets every part of the dash right, and getting into that software is what the rest of this write up is about.
+- **Oil pressure:** Different needle position calibration.
+- **Fuel level:** Different needle position calibration.
+- **Engine temperature:** Different needle position calibration.
+- **Transmission temperature:** Different needle position calibration.
+
+These differences are likely intended to accommodate variations in engine operating characteristics, transmission operating temperatures, and fuel tank configurations.
+
+---
+
+## 2. Converting a V6 Instrument Cluster for Use in a V8
+
+The objective of this project is to obtain a fully functional instrument cluster with an 8,000 RPM tachometer for use in a V8 F-150.
+
+### Why Not Simply Swap the Faceplates?
+
+Unfortunately, swapping the V6 faceplate onto the V8 instrument cluster and reprogramming the tachometer is not a viable solution. This is because the gear selector markings are centered on their respective faceplates, resulting in different physical locations for each character.
+
+<p align="center">
+  <img src="images/gear_selector_alignment.svg" width="650">
+  <br>
+  <em>Illustration of the physical misalignment between the V8 and V6 gear selector markings.</em>
+</p>
+
+Installing the V6 faceplate onto the V8 instrument cluster would cause the incorrect gear selector markings to illuminate.
+
+For this reason, we must start with a complete V6 instrument cluster.
+
+When the V6 instrument cluster is installed in the V8 truck, the P, R, N, D, and M indicators illuminate correctly. The additional 2 and 1 indicators remain unused.
+
+### Reprogramming the V6 Instrument Cluster
+
+The conversion itself is relatively simple. We need to transfer the entire EEPROM configuration from the original V8 instrument cluster while retaining the V6 tachometer conversion table.
+
+<p align="center">
+  <img src="images/eeprom_conversion.svg" width="650">
+</p>
+
+This preserves the original vehicle's mileage, VIN, display screen configurations, trailer brake settings, gauge calibrations, and other vehicle specific configuration settings.
+
+The only modification to the original V8 EEPROM file is the replacement of the tachometer conversion table.
+
+Once the modified EEPROM file is programmed into the V6 instrument cluster, the conversion is complete.
+
+---
 
 First attempt: the easy door (ForScan)
 
