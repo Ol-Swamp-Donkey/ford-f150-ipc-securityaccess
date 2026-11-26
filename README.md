@@ -266,6 +266,14 @@ The factory images are stored in black and white, the primary bootloader "adds" 
 
 ![Stock boot-splash animation, reconstructed from the graphics partition](boot_splash.gif)
 
+The splash lives on the Spansion SPI chip, but it's stored "paint-by-numbers" — each pixel is just a number (0–225), no color on that chip at all.
+The actual colors live in the main processor's firmware (MPC5645S), in palette #76 — 226 colors / 904 bytes at firmware offset 0x12CF50.
+At boot, the firmware copies palette #76 into the display's lookup table; the display reads numbers from the SPI chip + colors from the palette and marries them → full-color badge.
+Proof: apply palette #76 to the raw frames → clean image (the GIF). Any other palette → noise.
+Takeaway: recoloring = editing 904 bytes of firmware. No code patching.
+
+![Stock boot-splash with color animation, reconstructed from the graphics partition](built_ford_tough_color.gif)
+
 The display pipeline is:
 
 ```
