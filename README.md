@@ -453,22 +453,6 @@ We tried a lot of things that turned out unnecessary. Learn from them:
 - Thinking you need **L1** for the tach or the splash *image* — you don't; only for firmware/CLUT.
 
 ---
-
-# PART 9 — Current Status & What's Next
-
-**Done:**
-- Full hardware ID, memory map, and SecurityAccess analysis.
-- Complete display-pipeline reverse-engineering: DCU3 at `0xFFE5C000`, CLUT at `0xFFE5E000` (256× ARGB), layer format fields, the app's 142-palette UI CLUT table, the CLUT loader, and the conclusion that the splash palette is in the PBL.
-- A custom **color** splash fully designed, quantized, re-indexed, and packed — plus a grayscale-fallback build that's flashable today.
-
-**Next (blocked on hardware in the mail):**
-1. Solder the **2×7 header onto J600** and attach a **PowerPC JTAG debugger**.
-2. **Check JTAG censorship** first — the SPC5645S has a factory read-protect lock. If open, a dump of `0x0–0x8000` just works; if locked, that's a separate problem (glitch attack, no turnkey recipe).
-3. **Dump the primary bootloader** (`0x0–0x8000`), find its splash CLUT write, and point it at `COLOR_SPLASH_palette_256.bin`.
-4. Re-flash (needs L1) → **color splash on the dash.**
-
-**The end goal** (why this write-up exists): document the whole cluster so anyone can do this, and build a **pogo-pin JTAG jig** that clips onto `J600` to read/patch any cluster someone mails in — custom splash + settings, no gatekeeping, no $640 "service."
-
 ---
 
 *Disclaimer: performed on my own vehicle for legitimate repair/modification. No odometer, VIN, or safety-system tampering. Recovered secrets published for research completeness only. Verify local laws before modifying any vehicle module.*
