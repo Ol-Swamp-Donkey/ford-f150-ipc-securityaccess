@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 308" font-family="Arial,sans-serif" text-anchor="middle">
+<rect x="24" y="16" width="632" height="116" rx="12" fill="#171717"/><rect x="24" y="176" width="632" height="116" rx="12" fill="#171717"/>
+<g stroke="#dc8b39" stroke-width="3" stroke-dasharray="8 6"><path d="M180 132V176 M260 132V176 M340 132V176 M420 132V176 M500 132V176"/></g>
+<g fill="#aaa" font-size="20"><text x="340" y="50">V8 FACEPLATE</text><text x="340" y="210">V6 FACEPLATE</text></g>
+<g fill="white" font-size="40" font-weight="bold"><text x="180" y="102">P</text><text x="260" y="102">R</text><text x="340" y="102">N</text><text x="420" y="102">D</text><text x="500" y="102">M</text><text x="100" y="262">P</text><text x="580" y="262">1</text></g>
+<g fill="#efac60" font-size="40" font-weight="bold"><text x="180" y="262">R</text><text x="260" y="262">N</text><text x="340" y="262">D</text><text x="420" y="262">M</text><text x="500" y="262">2</text></g></svg>

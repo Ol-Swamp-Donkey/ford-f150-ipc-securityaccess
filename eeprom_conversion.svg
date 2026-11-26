@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 450" font-family="Arial,sans-serif" text-anchor="middle">
+<rect width="680" height="450" rx="16" fill="#fff"/>
+<g fill="#fff" stroke="#c5c8cc" stroke-width="2"><rect x="16" y="16" width="314" height="100" rx="12"/><rect x="350" y="16" width="314" height="100" rx="12"/><rect x="16" y="316" width="648" height="112" rx="12"/></g><rect x="16" y="176" width="648" height="100" rx="12" fill="#f1f3f5" stroke="#c5c8cc" stroke-width="2"/>
+<g fill="none" stroke="#626973" stroke-width="2.5" stroke-linejoin="round"><path d="M173 116V145H507V116 M340 145V169 M332 161L340 170L348 161 M340 276V308 M332 300L340 309L348 300"/></g>
+<g fill="#202124" font-size="23" font-weight="bold"><text x="173" y="53">V8 EEPROM</text><text x="507" y="53">V6 EEPROM</text><text x="340" y="214">Modified EEPROM</text><text x="340" y="355">V6 Instrument Cluster</text></g>
+<g fill="#555b63" font-size="17"><text x="173" y="83">Original vehicle configuration</text><text x="507" y="80">8,000 RPM tachometer</text><text x="507" y="101">conversion table</text><text x="340" y="245">V8 configuration with V6 tachometer conversion table</text><text x="340" y="385">Configured for the V8 vehicle</text><text x="340" y="407">with an 8,000 RPM tachometer</text></g></svg>
