@@ -149,21 +149,20 @@ The primary bootloader, the cluster’s innermost startup program, living in pro
 The secondary bootloader, a helper that loads during updates.
 The splash screen / graphics file, the startup animation and other on screen imagery.
 The EEPROM, a small memory chip that remembers settings even with the battery disconnected. This is where the gauge calibrations live (the tach, speedometer, and the other needles), along with vehicle identity info like the VIN and the mileage.
-A shortcut from a stranger on Reddit
 
 Someone on Reddit pointed out something important: the tachometer calibration sits in that EEPROM chip, and you don’t actually need the Level 1 password to get at it. You can buy a little clip that attaches directly to the chip, plus a device that talks to it, and read the chip’s contents off and write new contents back on, going around the main processor entirely. So that’s what I did for the gauge calibration. The splash screen graphics chip works the same way; it’s a different size, so it needs its own clip, but the idea is identical: clip on, read and write directly, skip the locked front door.
 
 The catch that sends me back to Level 1
 
-Here’s the snag. The splash screen’s color (that signature blue) isn’t stored in the graphics file. It appears to live in the primary bootloader, the one locked piece Ford won’t hand out. So to fully control the splash screen, I still need inside that bootloader, which means I still need the Level 1 secret after all.
+Here’s the snag. The splash screen’s color (that signature blue) isn’t stored in the graphics file. It's a palette table, Table #76 to be exact (226 colors, not 256), in the primary bootloader, the one locked piece Ford won’t hand out. So to fully control the splash screen, I still need inside that bootloader, which means I still need the Level 1 secret after all.
 
 The backdoor: JTAG
 
-More digging turned up the way in. These cluster boards have a small set of connection points called a JTAG header — essentially a maintenance port chip makers use to talk straight to the processor. So I soldered a tiny 2×7 header onto those pads, hooked up my JTAG tool (a PE Multilink), and pulled the primary bootloader — the one file Ford won’t hand out — right off the chip.
+More digging turned up the way in. These cluster boards have a small set of connection points called a JTAG header, essentially a maintenance port chip makers use to talk straight to the processor. So I soldered a tiny 2×7 header onto those pads, hooked up my JTAG tool (a PE Multilink), and pulled the primary bootloader, the one file Ford won’t hand out, right off the chip.
 
 It didn’t come easy. The connector isn’t keyed, so it only works flipped one way around (the tell: the stepper motors make no noise (Zeroing out) on power-up when the connector is arranged incorrectly). The processor locks the JTAG port the instant the normal software boots, so I had to catch it right at the moment of power-on, power-cycling the cluster over and over until the tool finally latched. But once it did, the whole bootloader came off the chip.
 
-Then I decompiled it, and there it was — the Level 1 secret, sitting right in the code, exactly where I figured it’d be. That’s the backdoor, and it’s open. With it I’ve got full access to read, change, and customize anything on this cluster: the gauge calibration I was chasing, the custom boot splash, all of it.
+Then I decompiled it, and there it was, the Level 1 secret, sitting right in the code, exactly where I figured it’d be. That’s the backdoor, and it’s open. With it I’ve got full access to read, change, and customize anything on this cluster: the gauge calibration I was chasing, the custom boot splash, all of it.
 
 What else I’m mapping along the way
 
@@ -171,11 +170,15 @@ While doing all this, I’ve been documenting everything about how the cluster w
 
 Where I am right now
 
-I’m waiting on the JTAG header pins to arrive in the mail (expected early December). Once they’re here, I solder them on, pull the bootloader, and we should be able to wrap this up.
+I am creating software to allow others to change these settings using an ODB II device, todays date is 11/26/2026 Happy Thanksgiving!  Hopefully I can get this created in the next month or sooner.
+
+To replicate this without the software mentioned above, you will need a PE Micro Multilink LC to read/write the MCU's primary bootloader, the current costs are USB-ML-UNIVERSAL-FX $599 or USB-ML-UNIVERSAL $299 but with this one you need to provide your own power supply to the board, much cheaper, this is what I did.  I found a random 12V power supply in my junk drawer and attached it to the pins on the board as outlined below.
+
+To read/write the EEPROM and/or the Spansion SPI chips (Configurations and Boot Splash respectively) you will need a XGecu T48 Programmer $73 on Amazon at the time of writing this, along with SOP8 and SOP16 chip clips, aprroximately $15 each.
 
 Why I’m sharing all of this
 
-I spent tens of hours and real money hitting dead ends to figure this out. I’m putting it all here, free and in the open, so the next person can skip the dead ends and jump straight to the part that works.
+I spent tens of hours, honestly over a hundred, and real money hitting dead ends to figure this out. I’m putting it all here, free and in the open, so the next person can skip the dead ends and jump straight to the part that works.
 
 ---
 
